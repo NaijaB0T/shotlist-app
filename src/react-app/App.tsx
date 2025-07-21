@@ -9,6 +9,7 @@ interface SearchParams { query: string; director: string; movieId: string; }
 interface ApiResponse { success: boolean; data: ImageResult[]; total_available: number; results_count: number; query: string; searchParams: SearchParams; error?: string; }
 interface MovieSuggestion { id: string; name: string; hit_score: number; }
 interface MovieSuggestionResponse { success: boolean; data?: MovieSuggestion[]; error?: string; }
+interface MetasResponse { success: boolean; data?: { similar_images: ImageResult[]; associated_searches: string[]; cinematographers: string[]; colors: string[]; imdb_url?: string; }; error?: string; }
 interface EmailModalProps { show: boolean; onClose: () => void; onSubmit: (email: string) => Promise<{ success: boolean; error?: string }>; }
 
 // --- Email Collection Modal Component ---
@@ -110,6 +111,8 @@ function App() {
   const [showSuggestions, setShowSuggestions] = useState<boolean>(false);
   const [showHelp, setShowHelp] = useState<boolean>(false);
   const [showEmailModal, setShowEmailModal] = useState<boolean>(false);
+  const [similarImages, setSimilarImages] = useState<ImageResult[]>([]);
+  const [loadingSimilar, setLoadingSimilar] = useState<boolean>(false);
   
   const searchCountRef = useRef<number>(0);
   const modalTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -376,14 +379,51 @@ function App() {
     }
   };
 
+  const fetchSimilarImages = async (image: ImageResult) => {
+    setLoadingSimilar(true);
+    setSimilarImages([]);
+    
+    try {
+      const response = await fetch('/api/metas', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ id: image.id }),
+      });
+
+      if (response.ok) {
+        const data: MetasResponse = await response.json();
+        if (data.success && data.data && data.data.similar_images) {
+          setSimilarImages(data.data.similar_images);
+        }
+      } else {
+        console.error('Failed to fetch similar images:', response.statusText);
+      }
+    } catch (err) {
+      console.error('Failed to fetch similar images:', err);
+    } finally {
+      setLoadingSimilar(false);
+    }
+  };
+
   const handleImageClick = (image: ImageResult) => {
     setSelectedImage(image);
     setShowVideo(false);
+    fetchSimilarImages(image);
   };
 
   const handleCloseModal = () => {
     setSelectedImage(null);
     setShowVideo(false);
+    setSimilarImages([]);
+    setLoadingSimilar(false);
+  };
+
+  const handleSimilarImageClick = (image: ImageResult) => {
+    setSelectedImage(image);
+    setShowVideo(false);
+    fetchSimilarImages(image);
   };
 
   const handlePlayVideo = () => {
@@ -618,6 +658,33 @@ function App() {
               {selectedImage.source_info.artists?.length > 0 && (<div><strong>Artists:</strong> {selectedImage.source_info.artists.join(', ')}</div>)}
               {selectedImage.source_info.production_companies?.length > 0 && (<div><strong>Production:</strong> {selectedImage.source_info.production_companies.join(', ')}</div>)}
               {selectedImage.source_info.brand && (<div><strong>Brand:</strong> {selectedImage.source_info.brand}</div>)}
+              
+              <div className="similar-images-section">
+                <h4>Similar Images</h4>
+                {loadingSimilar ? (
+                  <div className="similar-loading">
+                    <div className="spinner"></div>
+                    <p>Finding similar images...</p>
+                  </div>
+                ) : similarImages.length > 0 ? (
+                  <div className="similar-images-grid">
+                    {similarImages.map((img) => (
+                      <div 
+                        key={img.id} 
+                        className="similar-image-item"
+                        onClick={() => handleSimilarImageClick(img)}
+                      >
+                        <img src={img.urls.thumbnail} alt={img.title} />
+                        {img.has_video && (
+                          <div className="video-indicator"><Play size={10} /></div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="no-similar">No similar images found</p>
+                )}
+              </div>
             </div>
           </div>
         </div>

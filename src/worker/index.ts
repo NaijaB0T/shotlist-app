@@ -18,6 +18,17 @@ interface FlimApiResponse {
 interface FlimSuggestResponse {
   suggestions: { entity: string; /* ... other properties ... */ }[];
 }
+interface FlimMetasResponse {
+  detailed_image: {
+    image: FlimImage;
+    similar_images: FlimImage[];
+    associated_searches: string[];
+    cinematographers: string[];
+    proportionned_colors: { color: string }[];
+    colors: string[];
+    imdb_url?: string;
+  };
+}
 
 // --- Hono App Initialization ---
 
@@ -67,6 +78,85 @@ app.post('/addEmail', async (c) => {
       success: false,
       error: 'An error occurred while processing the request.',
       details: error.message,
+    }, 500);
+  }
+});
+
+/**
+ * Route: POST /api/metas
+ * Get detailed image metadata and similar images
+ */
+app.post('/metas', async (c) => {
+  try {
+    const body = await c.req.json<{ id: string }>();
+    const imageId = body.id;
+
+    if (!imageId) {
+      return c.json({ success: false, error: 'Image ID is required.' }, 400);
+    }
+
+    const apiHeaders = { 
+      'accept': '*/*', 
+      'content-type': 'application/json', 
+      'origin': 'https://app.flim.ai', 
+      'referer': 'https://app.flim.ai/', 
+      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36' 
+    };
+
+    const metasApiUrl = 'https://api.flim.ai/2.0.0/metas';
+    const requestBody = { id: imageId };
+    
+    const apiResponse = await fetch(metasApiUrl, {
+      method: 'POST',
+      headers: apiHeaders,
+      body: JSON.stringify(requestBody)
+    });
+
+    if (!apiResponse.ok) {
+      throw new Error(`Flim.ai Metas API error (Status: ${apiResponse.status})`);
+    }
+
+    const apiData: FlimMetasResponse = await apiResponse.json();
+    
+    // Transform similar images to match our frontend format
+    const similarImages = apiData.detailed_image.similar_images.map(img => ({
+      id: img.id,
+      title: img.title || 'N/A',
+      year: img.year,
+      category: img.category,
+      caption: img.caption,
+      source_info: {
+        directors: img.directors || [],
+        artists: img.artists || [],
+        production_companies: img.production_companies || [],
+        brand: img.brands ? img.brands[0] : null
+      },
+      urls: {
+        thumbnail: img.thumbnail_url,
+        medium_resolution: img.medium_resolution_url,
+        video_thumbnail: img.video_urls?.url_thumbnail || null
+      },
+      has_video: img.has_video_urls,
+      size: img.size
+    }));
+
+    return c.json({
+      success: true,
+      data: {
+        similar_images: similarImages,
+        associated_searches: apiData.detailed_image.associated_searches,
+        cinematographers: apiData.detailed_image.cinematographers,
+        colors: apiData.detailed_image.colors,
+        imdb_url: apiData.detailed_image.imdb_url
+      }
+    });
+
+  } catch (error: any) {
+    console.error(error.stack);
+    return c.json({
+      success: false,
+      error: 'An internal error occurred while fetching image metadata.',
+      details: error.message
     }, 500);
   }
 });
